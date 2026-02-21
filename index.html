@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>Wettkampf Tracker</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    :root { --bg:#0b0b0c; --card:#151518; --muted:#a9a9b2; --txt:#f3f3f6; --line:#2a2a30; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background:var(--bg); color:var(--txt);
+    }
+    header{
+      position:sticky; top:0; z-index:10;
+      padding:14px 16px; background:rgba(11,11,12,.92); backdrop-filter: blur(10px);
+      border-bottom:1px solid var(--line);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    header h1{ font-size:16px; margin:0; font-weight:700; letter-spacing:.2px; }
+    header .pill{
+      font-size:12px; color:var(--muted);
+      padding:6px 10px; border:1px solid var(--line); border-radius:999px;
+    }
+    main{ padding:14px 16px 88px; max-width:980px; margin:0 auto; }
+    .grid{ display:grid; gap:12px; }
+    .card{
+      background:var(--card); border:1px solid var(--line);
+      border-radius:16px; padding:14px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.25);
+    }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .row > * { flex: 1 1 auto; }
+    .muted{ color:var(--muted); font-size:12px; line-height:1.4; }
+    h2{ font-size:14px; margin:0 0 8px; }
+    h3{ font-size:13px; margin:12px 0 8px; color:#e9e9ee; }
+    label{ display:block; font-size:12px; color:var(--muted); margin:0 0 6px; }
+    input, textarea, select, button{
+      width:100%; padding:10px 12px; border-radius:12px;
+      border:1px solid var(--line); background:#0f0f12; color:var(--txt);
+      outline:none;
+    }
+    textarea{ min-height:90px; resize:vertical; }
+    button{
+      cursor:pointer; font-weight:700;
+      background:#111114;
+    }
+    button.primary{ background:#1b1b20; border-color:#34343c; }
+    button.ok{ background:rgba(46, 204, 113, .12); border-color:rgba(46,204,113,.35); }
+    button.warn{ background:rgba(241, 196, 15, .12); border-color:rgba(241,196,15,.35); }
+    button.bad{ background:rgba(231, 76, 60, .12); border-color:rgba(231,76,60,.35); }
+    .tabs{
+      position:fixed; bottom:0; left:0; right:0; z-index:20;
+      background:rgba(11,11,12,.92); backdrop-filter: blur(10px);
+      border-top:1px solid var(--line);
+      display:flex; gap:8px; padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+      justify-content:center;
+    }
+    .tab{
+      max-width:220px; flex:1 1 0;
+      font-size:12px; padding:10px 10px; border-radius:14px;
+      border:1px solid var(--line); background:#0f0f12; color:var(--muted);
+    }
+    .tab.active{ color:var(--txt); border-color:#3a3a44; background:#131318; }
+    .badge{ display:inline-block; margin-left:8px; font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+    .hr{ height:1px; background:var(--line); margin:12px 0; }
+    .kpi{ display:flex; gap:10px; flex-wrap:wrap; }
+    .kpi .mini{ flex:1 1 120px; padding:10px; border:1px solid var(--line); border-radius:14px; background:#0f0f12; }
+    .mini .v{ font-size:14px; font-weight:800; }
+    .mini .k{ font-size:11px; color:var(--muted); margin-top:2px; }
+    .tiny{ font-size:11px; color:var(--muted); }
+    .inline{ display:flex; gap:10px; }
+    .inline > div{ flex:1 1 0; }
+    .exercise{ padding:10px; border:1px solid var(--line); border-radius:14px; background:#0f0f12; }
+    .exercise .name{ font-weight:800; font-size:13px; }
+    .exercise .preset{ font-size:11px; color:var(--muted); margin-top:2px; }
+    .exercise .inputs{ margin-top:10px; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; }
+    .exercise .inputs input{ padding:10px 10px; }
+    .right{ text-align:right; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Wettkampf Tracker</h1>
+    <div class="pill" id="phasePill">–</div>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="heute">Heute</button>
+    <button class="tab" data-view="woche">Woche</button>
+    <button class="tab" data-view="rm">1RM</button>
+    <button class="tab" data-view="settings">Daten</button>
+  </nav>
+
+<script>
+/** ====== Konfiguration ====== */
+const CONFIG = {
+  reEntryStart: "2026-02-21",
+  mainStart: "2026-03-01",
+  mainEnd: "2026-07-01",
+  weeks: 12,
+  // Baseline 1RM
+  baseline1RM: {
+    knie: 120,
+    kreuz: 150,
+    bank: 90,
+    ohp: 70,
+    klimm: "10–12 Wdh BW"
+  },
+  // Zielwerte (+7–10%) gerundet auf übliche Scheiben
+  target1RM: {
+    knie: "130 kg",
+    kreuz: "162,5 kg",
+    bank: "97,5 kg",
+    ohp: "75 kg",
+    klimm: "12–14 Wdh BW / +5 kg × 6–8"
+  },
+  // Plan: nur Grundübungen (Startgewichte W1 konservativ nach Erkältung)
+  sessions: {
+    mo: {
+      title: "Montag – Lower Schwer",
+      items: [
+        { key:"kniebeuge", name:"Kniebeuge", setsReps:"5×5", start:"90–95 kg (W1)" },
+        { key:"rdl", name:"Rumänisches Kreuzheben", setsReps:"4×6", start:"80–85 kg" },
+        { key:"bss", name:"Bulgarian Split Squat", setsReps:"3×8/Bein", start:"2×20–22,5 kg" },
+        { key:"hlr", name:"Hanging Leg Raises", setsReps:"3×12", start:"BW" },
+      ]
+    },
+    di: {
+      title: "Dienstag – Upper Schwer",
+      items: [
+        { key:"bank", name:"Bankdrücken", setsReps:"5×5", start:"65–70 kg" },
+        { key:"klimm", name:"Klimmzüge", setsReps:"5×AMRAP", start:"BW" },
+        { key:"ohp", name:"Schulterdrücken (LH)", setsReps:"4×6", start:"40–42,5 kg" },
+        { key:"row", name:"Langhantelrudern", setsReps:"4×6", start:"70–75 kg" },
+      ]
+    },
+    do: {
+      title: "Donnerstag – Lower Volumen",
+      items: [
+        { key:"front", name:"Front Squat", setsReps:"4×6", start:"60–65 kg" },
+        { key:"dead", name:"Kreuzheben", setsReps:"3×4", start:"95–100 kg" },
+        { key:"swings", name:"Kettlebell Swings", setsReps:"3×20", start:"24–32 kg" },
+        { key:"plank", name:"Plank", setsReps:"3×75 s", start:"BW" },
+      ]
+    },
+    fr: {
+      title: "Freitag – Upper Volumen",
+      items: [
+        { key:"incline", name:"Schrägbankdrücken", setsReps:"4×8", start:"50–55 kg" },
+        { key:"klimm_eng", name:"Klimmzüge eng", setsReps:"4×AMRAP", start:"BW" },
+        { key:"pushpress", name:"Push Press", setsReps:"4×5", start:"45 kg" },
+        { key:"ringrow", name:"Ring Rows", setsReps:"3×12", start:"BW" },
+      ]
+    }
+  },
+  weeklyChecklist: [
+    { key:"t1", label:"4 Trainings erledigt" },
+    { key:"kal", label:"Kalorien ≥ 90% eingehalten" },
+    { key:"steps", label:"Schritte Ø ≥ 12–15k" },
+    { key:"gw", label:"Gewicht notiert" },
+    { key:"bauch", label:"Bauchumfang notiert" },
+  ]
+};
+
+/** ====== Storage ====== */
+const STORE_KEY = "wettkampf_tracker_v1";
+const todayISO = () => new Date().toISOString().slice(0,10);
+
+function loadState(){
+  const raw = localStorage.getItem(STORE_KEY);
+  if(raw) return JSON.parse(raw);
+  const init = {
+    activeView: "heute",
+    // Logs pro Datum
+    logs: {},
+    // Wochen-Tracker
+    weeks: Array.from({length: CONFIG.weeks}, (_,i)=>({
+      week: i+1, weight:"", waist:"", checks: {}, notes:""
+    })),
+    // 1RM Abschlusstest
+    rmTest: { knie:"", kreuz:"", bank:"", ohp:"", klimm:"", notes:"" }
+  };
+  localStorage.setItem(STORE_KEY, JSON.stringify(init));
+  return init;
+}
+function saveState(){
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+}
+let state = loadState();
+
+/** ====== Helpers ====== */
+function parseDate(s){ return new Date(s+"T00:00:00"); }
+function inRange(d, a, b){ return d >= a && d <= b; }
+function phaseLabel(){
+  const d = parseDate(todayISO());
+  const reA = parseDate(CONFIG.reEntryStart);
+  const reB = parseDate(CONFIG.mainStart);
+  const mainA = parseDate(CONFIG.mainStart);
+  const mainB = parseDate(CONFIG.mainEnd);
+  if(inRange(d, reA, new Date(reB.getTime()-86400000))) return "Re-Entry (bis 01.03.)";
+  if(inRange(d, mainA, mainB)) return "Hauptphase (01.03.–01.07.)";
+  return "Außerhalb Zeitraum";
+}
+function dayKeyFromDate(iso){
+  const d = new Date(iso+"T00:00:00");
+  const wd = d.getDay(); // 0 So .. 6 Sa
+  if(wd===1) return "mo";
+  if(wd===2) return "di";
+  if(wd===4) return "do";
+  if(wd===5) return "fr";
+  return null;
+}
+function getLog(date){
+  if(!state.logs[date]) state.logs[date] = { sessionKey:null, exercises:{}, notes:"", done:false };
+  return state.logs[date];
+}
+function fmtWeekWindow(weekIndex){
+  const start = parseDate(CONFIG.mainStart);
+  const wStart = new Date(start.getTime() + (weekIndex*7*86400000));
+  const wEnd = new Date(wStart.getTime() + (6*86400000));
+  const f = (x)=> x.toISOString().slice(0,10);
+  return `${f(wStart)} bis ${f(wEnd)}`;
+}
+
+/** ====== UI Rendering ====== */
+const view = document.getElementById("view");
+document.getElementById("phasePill").textContent = phaseLabel();
+
+function setActiveTab(name){
+  document.querySelectorAll(".tab").forEach(b=>{
+    b.classList.toggle("active", b.dataset.view===name);
+  });
+  state.activeView = name;
+  saveState();
+  render();
+}
+
+document.querySelectorAll(".tab").forEach(b=>{
+  b.addEventListener("click", ()=> setActiveTab(b.dataset.view));
+});
+
+function render(){
+  const v = state.activeView;
+  if(v==="heute") return renderHeute();
+  if(v==="woche") return renderWoche();
+  if(v==="rm") return renderRM();
+  if(v==="settings") return renderSettings();
+}
+function card(html){ return `<div class="card">${html}</div>`; }
+
+function renderHeute(){
+  const d = todayISO();
+  const dayKey = dayKeyFromDate(d);
+  const log = getLog(d);
+
+  const top = card(`
+    <h2>Heute <span class="badge">${d}</span></h2>
+    <div class="muted">Wenn heute kein Trainingstag ist: nur Notes/Recovery loggen.</div>
+    <div class="hr"></div>
+    <div class="kpi">
+      <div class="mini"><div class="v">${phaseLabel()}</div><div class="k">Phase</div></div>
+      <div class="mini"><div class="v">${dayKey ? CONFIG.sessions[dayKey].title : "Kein Plan-Training"}</div><div class="k">Einheit</div></div>
+      <div class="mini"><div class="v">${log.done ? "✅ erledigt" : "⬜ offen"}</div><div class="k">Status</div></div>
+    </div>
+  `);
+
+  let sessionBlock = card(`
+    <h2>Training</h2>
+    <div class="muted">${dayKey ? "Tracke Gewicht / Wdh / RPE pro Übung. Alles wird lokal gespeichert." : "Heute ist kein geplanter Trainingstag (Mo/Di/Do/Fr). Du kannst trotzdem Notizen speichern."}</div>
+    ${dayKey ? renderSessionEditor(d, dayKey) : ""}
+    <div class="hr"></div>
+    <label>Notizen (heute)</label>
+    <textarea id="todayNotes" placeholder="Schlaf, Energie, Erkältungssymptome, Schmerzen, etc.">${escapeHtml(log.notes||"")}</textarea>
+    <div class="row" style="margin-top:10px;">
+      <button class="primary ok" id="markDone">${log.done ? "Als offen markieren" : "Als erledigt markieren"}</button>
+    </div>
+  `);
+
+  view.innerHTML = `<div class="grid">${top}${sessionBlock}</div>`;
+
+  // bind
+  const notesEl = document.getElementById("todayNotes");
+  notesEl.addEventListener("input", ()=>{
+    const l = getLog(d);
+    l.notes = notesEl.value;
+    saveState();
+  });
+  document.getElementById("markDone").addEventListener("click", ()=>{
+    const l = getLog(d);
+    l.done = !l.done;
+    saveState();
+    render();
+  });
+
+  if(dayKey) bindSessionEditor(d, dayKey);
+}
+
+function renderSessionEditor(date, dayKey){
+  const sess = CONFIG.sessions[dayKey];
+  const log = getLog(date);
+  log.sessionKey = dayKey;
+
+  const exHtml = sess.items.map(item=>{
+    const ex = log.exercises[item.key] || { weight:"", reps:"", rpe:"" };
+    return `
+      <div class="exercise">
+        <div class="name">${item.name}</div>
+        <div class="preset">${item.setsReps} • Start: ${item.start}</div>
+        <div class="inputs">
+          <div><label>Gewicht</label><input inputmode="decimal" data-ex="${item.key}" data-f="weight" placeholder="z.B. 92,5" value="${escapeAttr(ex.weight)}"></div>
+          <div><label>Wdh</label><input inputmode="numeric" data-ex="${item.key}" data-f="reps" placeholder="z.B. 5/5/5/5/5" value="${escapeAttr(ex.reps)}"></div>
+          <div><label>RPE</label><input inputmode="decimal" data-ex="${item.key}" data-f="rpe" placeholder="z.B. 7,5" value="${escapeAttr(ex.rpe)}"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `<div class="grid" style="margin-top:10px;">${exHtml}</div>`;
+}
+function bindSessionEditor(date, dayKey){
+  const log = getLog(date);
+  document.querySelectorAll("input[data-ex]").forEach(inp=>{
+    inp.addEventListener("input", ()=>{
+      const exKey = inp.dataset.ex;
+      const field = inp.dataset.f;
+      if(!log.exercises[exKey]) log.exercises[exKey] = { weight:"", reps:"", rpe:"" };
+      log.exercises[exKey][field] = inp.value;
+      saveState();
+    });
+  });
+}
+
+function renderWoche(){
+  const blocks = state.weeks.map((w, idx)=>{
+    const checksHtml = CONFIG.weeklyChecklist.map(c=>{
+      const val = !!w.checks[c.key];
+      return `
+        <div class="row" style="align-items:center; gap:8px;">
+          <button class="tab ${val ? "active" : ""}" style="text-align:left;" data-week="${idx}" data-check="${c.key}">
+            ${val ? "✅" : "⬜"} ${c.label}
+          </button>
+        </div>
+      `;
+    }).join("");
+
+    return card(`
+      <h2>Woche ${w.week} <span class="badge">${fmtWeekWindow(idx)}</span></h2>
+      <div class="inline">
+        <div>
+          <label>Gewicht (Wochenschnitt)</label>
+          <input inputmode="decimal" data-w="${idx}" data-f="weight" placeholder="z.B. 83,4" value="${escapeAttr(w.weight)}" />
+        </div>
+        <div>
+          <label>Bauchumfang (Nabel)</label>
+          <input inputmode="decimal" data-w="${idx}" data-f="waist" placeholder="z.B. 86,0" value="${escapeAttr(w.waist)}" />
+        </div>
+      </div>
+      <div class="hr"></div>
+      <h3>Checkliste</h3>
+      <div class="grid">${checksHtml}</div>
+      <div class="hr"></div>
+      <label>Notizen</label>
+      <textarea data-w="${idx}" data-f="notes" placeholder="Was lief gut? Wo warst du inkonsequent?">${escapeHtml(w.notes||"")}</textarea>
+    `);
+  }).join("");
+
+  view.innerHTML = `<div class="grid">
+    ${card(`<h2>Woche</h2><div class="muted">Hier machst du deine Compliance sichtbar. Jede Woche eintragen. Keine Ausreden.</div>`)}
+    ${blocks}
+  </div>`;
+
+  // bind inputs
+  document.querySelectorAll("input[data-w], textarea[data-w]").forEach(el=>{
+    el.addEventListener("input", ()=>{
+      const idx = Number(el.dataset.w);
+      const f = el.dataset.f;
+      state.weeks[idx][f] = el.value;
+      saveState();
+    });
+  });
+  // bind checklist buttons
+  document.querySelectorAll("button[data-week][data-check]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const idx = Number(btn.dataset.week);
+      const key = btn.dataset.check;
+      state.weeks[idx].checks[key] = !state.weeks[idx].checks[key];
+      saveState();
+      render();
+    });
+  });
+}
+
+function renderRM(){
+  const b = CONFIG.baseline1RM;
+  const t = CONFIG.target1RM;
+  const r = state.rmTest;
+
+  view.innerHTML = `<div class="grid">
+    ${card(`
+      <h2>1RM Baseline & Ziele</h2>
+      <div class="muted">Baseline = deine aktuellen Werte. Ziel = realistisch (+7–10%) trotz Cut, sauber getestet.</div>
+      <div class="hr"></div>
+      <div class="grid">
+        ${rmRow("Kniebeuge", b.knie+" kg", t.knie)}
+        ${rmRow("Kreuzheben", b.kreuz+" kg", t.kreuz)}
+        ${rmRow("Bankdrücken", b.bank+" kg", t.bank)}
+        ${rmRow("Schulterdrücken", b.ohp+" kg", t.ohp)}
+        ${rmRow("Klimmzüge", b.klimm, t.klimm)}
+      </div>
+    `)}
+    ${card(`
+      <h2>Abschlusstest (nach Woche 12)</h2>
+      <div class="muted">Trage hier die finalen Ergebnisse ein.</div>
+      <div class="hr"></div>
+      <div class="inline">
+        <div><label>Kniebeuge (1RM)</label><input inputmode="decimal" id="rm_knie" placeholder="kg" value="${escapeAttr(r.knie)}"></div>
+        <div><label>Kreuzheben (1RM)</label><input inputmode="decimal" id="rm_kreuz" placeholder="kg" value="${escapeAttr(r.kreuz)}"></div>
+      </div>
+      <div class="inline" style="margin-top:10px;">
+        <div><label>Bankdrücken (1RM)</label><input inputmode="decimal" id="rm_bank" placeholder="kg" value="${escapeAttr(r.bank)}"></div>
+        <div><label>Schulterdrücken (1RM)</label><input inputmode="decimal" id="rm_ohp" placeholder="kg" value="${escapeAttr(r.ohp)}"></div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Klimmzüge (Wdh oder Zusatzgewicht)</label>
+        <input id="rm_klimm" placeholder="z.B. 13 Wdh BW oder +10 kg x 5" value="${escapeAttr(r.klimm)}">
+      </div>
+      <div style="margin-top:10px;">
+        <label>Notizen</label>
+        <textarea id="rm_notes" placeholder="Was hat funktioniert? Was war der Engpass?">${escapeHtml(r.notes||"")}</textarea>
+      </div>
+      <div class="hr"></div>
+      <div class="row">
+        <button class="primary" id="rm_autofill">Zielwerte als Ziele notieren</button>
+      </div>
+    `)}
+  </div>`;
+
+  // bind
+  const bind = (id, key) => {
+    const el = document.getElementById(id);
+    el.addEventListener("input", ()=>{
+      state.rmTest[key] = el.value;
+      saveState();
+    });
+  };
+  bind("rm_knie","knie");
+  bind("rm_kreuz","kreuz");
+  bind("rm_bank","bank");
+  bind("rm_ohp","ohp");
+  bind("rm_klimm","klimm");
+  bind("rm_notes","notes");
+
+  document.getElementById("rm_autofill").addEventListener("click", ()=>{
+    // kleiner Motivations-Nudge: Ziele in Notizen setzen
+    state.rmTest.notes = (state.rmTest.notes || "").trim();
+    const goalLine = `Ziele: SQ ${t.knie}, DL ${t.kreuz}, BP ${t.bank}, OHP ${t.ohp}, Klimm ${t.klimm}`;
+    if(!state.rmTest.notes.includes("Ziele:")) {
+      state.rmTest.notes = (state.rmTest.notes ? state.rmTest.notes + "\n\n" : "") + goalLine;
+      saveState();
+      render();
+    }
+  });
+}
+
+function rmRow(name, baseline, target){
+  return `<div class="exercise">
+    <div class="name">${name}</div>
+    <div class="preset">Baseline: ${baseline} • Ziel: ${target}</div>
+  </div>`;
+}
+
+function renderSettings(){
+  view.innerHTML = `<div class="grid">
+    ${card(`
+      <h2>Daten</h2>
+      <div class="muted">Alles ist lokal gespeichert. Du kannst exportieren oder komplett zurücksetzen.</div>
+      <div class="hr"></div>
+      <div class="row">
+        <button class="primary" id="exportBtn">Export (JSON kopieren)</button>
+        <button class="warn" id="resetWeekBtn">Wochen-Tracking zurücksetzen</button>
+        <button class="bad" id="resetAllBtn">Alles löschen</button>
+      </div>
+      <div class="hr"></div>
+      <label>Export-Ausgabe</label>
+      <textarea id="exportOut" readonly placeholder="Hier erscheint dein Export..."></textarea>
+      <div class="tiny" style="margin-top:10px;">Tipp: Export in Notizen-App speichern oder dir per Mail schicken.</div>
+    `)}
+    ${card(`
+      <h2>Re-Entry Reminder</h2>
+      <div class="muted">Wenn du wieder krank wirst: Intensität runter, Technik/Bewegung rein, kein Held spielen.</div>
+      <div class="hr"></div>
+      <div class="tiny">Regel: 2 Tage Fieber/Brust → Training pausieren. Danach 3 Einheiten @ 50–60% 1RM.</div>
+    `)}
+  </div>`;
+
+  document.getElementById("exportBtn").addEventListener("click", async ()=>{
+    const out = document.getElementById("exportOut");
+    out.value = JSON.stringify(state, null, 2);
+    out.focus(); out.select();
+    try { await navigator.clipboard.writeText(out.value); } catch(e){}
+  });
+
+  document.getElementById("resetWeekBtn").addEventListener("click", ()=>{
+    if(!confirm("Wochen-Tracking wirklich zurücksetzen?")) return;
+    state.weeks = Array.from({length: CONFIG.weeks}, (_,i)=>({ week:i+1, weight:"", waist:"", checks:{}, notes:"" }));
+    saveState(); render();
+  });
+
+  document.getElementById("resetAllBtn").addEventListener("click", ()=>{
+    if(!confirm("ALLES löschen?")) return;
+    localStorage.removeItem(STORE_KEY);
+    state = loadState();
+    render();
+  });
+}
+
+/** ====== Utils ====== */
+function escapeHtml(s){
+  return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+}
+function escapeAttr(s){
+  return String(s??"").replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+}
+
+/** ====== Service worker ====== */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=> navigator.serviceWorker.register("./service-worker.js"));
+}
+
+render();
+</script>
+</body>
+</html>{
+  "name": "Wettkampf Tracker",
+  "short_name": "Tracker",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0b0b0c",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}const CACHE_NAME = "wettkampf-tracker-v1";
+const ASSETS = ["./", "./index.html", "./manifest.json", "./service-worker.js", "./icon-192.png", "./icon-512.png"];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.map(k => k !== CACHE_NAME ? caches.delete(k) : null)))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
